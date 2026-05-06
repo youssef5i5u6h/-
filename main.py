@@ -5,7 +5,7 @@ import asyncio
 import glob
 from pathlib import Path
 from telethon import TelegramClient, events
-from telethon.tl.functions.channels import CreateChannelRequest, EditPhotoRequest, EditDescriptionRequest
+from telethon.tl.functions.channels import CreateChannelRequest, EditPhotoRequest, EditAboutRequest
 from telethon.tl.types import InputChatUploadedPhoto
 from config import API_ID, API_HASH, SESSION_NAME
 
@@ -315,7 +315,7 @@ async def setup_archive_group():
             ARCHIVE_GROUP_ID = created_chat.chats[0].id
             print(f"🔥 تم إنشاء مجموعة تخزين خاصة وتلقائية جديدة بـ ID: {ARCHIVE_GROUP_ID}")
             
-            await client(EditDescriptionRequest(channel=ARCHIVE_GROUP_ID, description=group_desc))
+            await client(EditAboutRequest(channel=ARCHIVE_GROUP_ID, about=group_desc))
             
             photo_path = "avatar.jpg"
             if os.path.exists(photo_path):
