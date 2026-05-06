@@ -2,7 +2,8 @@ import os
 import time
 import random
 import asyncio
-import sqlite3
+import glob
+from pathlib import Path
 from telethon import TelegramClient, events
 from config import API_ID, API_HASH, SESSION_NAME
 
@@ -20,14 +21,14 @@ OUT_PLAYERS = set()
 LAST_GAME_MSG_ID = None  
 GAME_ACTIVE = False      
 
-# ==================== [ القائمة الرئيسية ] ====================
+# ==================== [ القائمة الرئيسية باسم .السليب ] ====================
 HELP_TEXT = """●▬▬▬▬๑۩🇵🇹 قوائم سورس البرتغالي الكونية 🇵🇹۩๑▬▬▬▬▬●
 
 .م1 ➪ أوامر الإشراف والتحكم
 .م2 ➪ أوامر الكتم والتقييد
 .م3 ➪ أوامر الكتم والحظر العام
 .م4 ➪ أوامر التنظيف والتطهير
-.م5 ➪ الخاص وحماية الحساب
+.م5 ➪ الخاص وحماية الحساب (جواها أمر .سليب)
 .م6 ➪ أوامر الكول والتشغيل
 .م7 ➪ أوامر التسلية والألعاب
 .م8 ➪ أوامر الإذاعة والنشر
@@ -61,30 +62,26 @@ HELP_TEXT = """●▬▬▬▬๑۩🇵🇹 قوائم سورس البرتغال
 SUB_MENUS = {
     "1": "🛠 **أوامر الإشراف والتحكم:**\n`.طرد` ريبلاي لطرد عضو\n`.حظر` ريبلاي لحظر عضو\n`.الغاء حظر` لفك الحظر",
     "2": "🔇 **أوامر الكتم والتقييد:**\n`.كتم` لمنع العضو من إرسال رسائل\n`.الغاء كتم` لفك كتم العضو",
-    "5": "🛡 **الخاص وحماية الحساب:**\n`.سليب` تفعيل وضع النوم تلقائياً\n`.سليب + السبب` تفعيل وضع النوم مع سبب مخصص\n`.سماح` ريبلاي للسماح لشخص بالخاص",
+    "5": "🛡 **الخاص وحماية الحساب:**\n`.سليب` تفعيل وضع النوم تلقائياً\n`.سليب + السبب` تفعيل وضع النوم مع سبب مخصص\n`.صحيت` لتعطيل الوضع مانيوال\n`.سماح` ريبلاي للسماح لشخص بالخاص",
     "7": "🎲 **أوامر التسلية والألعاب:**\n`.نسبة` لمعرفة نسبة حبك لشخص\n`.كت تويت` لعبه كت تويت ممتعة\n`.صراحة` سؤال صراحة قوي\n`.خيروك` لعبة لو خيروك\n`.بدء` لاختيار (الحاكم والمحكوم) وإقصاء الخاسر\n`.تصفير` لإنهاء وقفل اللعبة تماماً وإعادة تصفير كل شيء\n`.شارك` بعمل إعادة توجيه لرسالة القرعة فقط أثناء اللعب",
     "11": "📊 **معلومات الحساب والجروب:**\n`.ايدي` أو `.ايديات` لجلب معلومات الشات والريبلاي\n`.معلوماتي` لعرض بيانات حسابك"
 }
 
-@client.on(events.NewMessage(pattern=r"^\.(الاوامر|اوامر|مساعدة)"))
+# تعديل أمر القائمة ليكون .السليب كأمر خارجي وداخلي للكل
+@client.on(events.NewMessage(pattern=r"^\.(السليب|الاوامر|اوامر|مساعدة)"))
 async def help_menu(event):
-    if event.out:
-        await event.edit(HELP_TEXT)
-    else:
-        await event.reply(HELP_TEXT)
+    if event.out: await event.edit(HELP_TEXT)
+    else: await event.reply(HELP_TEXT)
     raise events.StopPropagation
 
 @client.on(events.NewMessage(pattern=r"^\.م([0-9]+)"))
 async def sub_menu_handler(event):
     num = event.pattern_match.group(1)
     text = SUB_MENUS.get(num, f"ℹ️ القائمة الفرعية رقم `.م{num}` قيد التطوير والتحديث البرتغالي.")
-    if event.out:
-        await event.edit(text)
-    else:
-        await event.reply(text)
+    if event.out: await event.edit(text)
+    else: await event.reply(text)
     raise events.StopPropagation
 
-# ==================== [ محرك أمر فحص البوت ] ====================
 @client.on(events.NewMessage(pattern=r"^\.فحص"))
 async def ping_check(event):
     start = time.time()
@@ -96,21 +93,36 @@ async def ping_check(event):
     await msg.edit(result)
     raise events.StopPropagation
 
-# ==================== [ محرك وضع السليب (AFK) والرد التلقائي ] ====================
-@client.on(events.NewMessage(outgoing=True, pattern=r"^\.سليب(?: (.*))?"))
+# ==================== [ محرك وضع السليب الأساسي باسم .سليب ] ====================
+
+@client.on(events.NewMessage(pattern=r"^\.سليب($| (.*))"))
 async def set_afk(event):
     global AFK_STATUS, AFK_TIME, AFK_REASON
     if not AFK_STATUS:
         AFK_STATUS = True
         AFK_TIME = time.time()
-        reason = event.pattern_match.group(1)
+        reason = event.pattern_match.group(2) # جلب السبب بدقة
         AFK_REASON = reason if reason else DEFAULT_REASON
-        await event.edit(f"💤 **تم تفعيل وضع السليب بنجاح.**\n📝 الرد الحالي: `{AFK_REASON}`")
+        text = f"💤 **تم تفعيل وضع السليب بنجاح.**\n📝 الرد الحالي: `{AFK_REASON}`"
+        if event.out: await event.edit(text)
+        else: await event.reply(text)
+    raise events.StopPropagation
+
+@client.on(events.NewMessage(pattern=r"^\.(صحيت|الغاء السليب|الغاء سليب)$"))
+async def disable_afk_command(event):
+    global AFK_STATUS
+    if AFK_STATUS:
+        AFK_STATUS = False
+        text = "⚡ **تم إلغاء وضع السليب بنجاح وعال العال!**"
+        if event.out: await event.edit(text)
+        else: await event.reply(text)
     raise events.StopPropagation
 
 @client.on(events.NewMessage())
 async def afk_handler(event):
     global AFK_STATUS, AFK_TIME, AFK_REASON
+    
+    # يتأكد إن الرسالة اللي كتبتها مش أمر تفعيل .سليب
     if event.out and AFK_STATUS and not event.text.startswith(".سليب"):
         AFK_STATUS = False
         duration = round(time.time() - AFK_TIME)
@@ -152,7 +164,6 @@ async def cut_tweet(event):
     else: await event.reply(text)
     raise events.StopPropagation
 
-# ==================== [ نظام لعبة الحاكم والمحكوم النظيف والمحمي ] ====================
 @client.on(events.NewMessage(pattern=r"^\.بدء"))
 async def start_choosing(event):
     global OUT_PLAYERS, LAST_GAME_MSG_ID, GAME_ACTIVE
@@ -180,12 +191,9 @@ async def start_choosing(event):
     judge_mention = f"[{judge.first_name}](tg://user?id={judge.id})"
     victim_mention = f"[{victim.first_name}](tg://user?id={victim.id})"
     
-    reply_msg = f"👤 **المحكوم عليه:** {victim_mention}\n"
-    reply_msg += f"👨‍⚖️ **الـحـاكـم:** {judge_mention}"
+    reply_msg = f"👤 **المحكوم عليه:** {victim_mention}\n👨‍⚖️ **الـحـاكـم:** {judge_mention}"
     
-    if event.out:
-        await event.delete()
-        
+    if event.out: await event.delete()
     sent_msg = await event.respond(reply_msg)
     LAST_GAME_MSG_ID = sent_msg.id  
     raise events.StopPropagation
@@ -201,43 +209,48 @@ async def reset_game(event):
     else: await event.reply(text)
     raise events.StopPropagation
 
-# ==================== [ محرك أمر شارك المحمي ] ====================
 @client.on(events.NewMessage(pattern=r"^\.شارك"))
 async def forward_handler(event):
     global LAST_GAME_MSG_ID, GAME_ACTIVE
-    
     if not GAME_ACTIVE or LAST_GAME_MSG_ID is None:
         text = "❌ اللعبه قفلت خلاص!"
         if event.out: await event.edit(text)
         else: await event.reply(text)
         raise events.StopPropagation
-        
     if not event.reply_to_msg_id:
         text = "⚠️ لازم ريبلاي على رسالة القرعة!"
         if event.out: await event.edit(text)
         else: await event.reply(text)
         raise events.StopPropagation
-    
     if event.reply_to_msg_id != LAST_GAME_MSG_ID:
         text = "❌ غلط! لازم ريبلاي على رسالة القرعة الأخيرة بس."
         if event.out: await event.edit(text)
         else: await event.reply(text)
         raise events.StopPropagation
-    
-    if event.out:
-        await event.delete()
-        
+    if event.out: await event.delete()
     await client.forward_messages(event.chat_id, event.reply_to_msg_id)
     raise events.StopPropagation
 
-# ==================== [ المحرك السحري لتشغيل السورس بشكل دائم ] ====================
+# ==================== [ ميكانيزم استدعاء الملفات الخارجية تلقائياً ] ====================
+def load_plugins():
+    possible_folders = ["plugins", "modules", "commands"]
+    for folder in possible_folders:
+        if os.path.exists(folder):
+            for f in glob.glob(f"{folder}/*.py"):
+                name = Path(f).stem
+                if not name.startswith("__"):
+                    try:
+                        __import__(f"{folder}.{name}")
+                    except Exception as e:
+                        print(f"⚠️ خطأ أثناء تحميل الملف {name}: {e}")
+
+# تشغيل الـ Loop لحماية البوت من الموت والتوقف
 async def main():
-    # بدء تشغيل الحساب بأمان كامل دون انقطاع الاتصال
     await client.start()
-    print("--- 🇵🇹 سورس البرتغالي شغال الآن طيران داخلي وخارجي بأمان تام ---")
+    load_plugins()
+    print("--- 🇵🇹 سورس البرتغالي شغال الآن طيران وفيه .سليب و .السليب بدقة ---")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    # تشغيل الـ Async loop الرئيسي لحماية البوت من الموت والتوقف
     asyncio.run(main())
 
