@@ -237,28 +237,21 @@ if __name__ == "__main__":
     print("="*50 + "\n")
     client.start()
     client.run_until_disconnected()
-# متغيرات لحفظ حالة النوم والوقت والسبب
+    # وضع السليب المتوافق مع السورس
 AFK_STATUS = False
-AFK_TIME = None
+AFK_TIME = 0
 AFK_REASON = ""
-
-# هنا تقدر تغير الكلمة الافتراضية اللي هترد بيها لو كتبت .سليب من غير ما تحدد سبب
 DEFAULT_REASON = "قافل حالياً، أول ما أفتح هرد عليك بالتفصيل."
 
 @client.on(events.NewMessage(outgoing=True))
 async def afk_breaker(event):
     global AFK_STATUS, AFK_TIME, AFK_REASON
-    # لو كتبت رسالة في أي شات.. يتعطل وضع النوم تلقائياً
     if AFK_STATUS:
         AFK_STATUS = False
-        end_time = time.time()
-        duration = round(end_time - AFK_TIME)
-        
-        # حساب وقت الغياب
+        duration = round(time.time() - AFK_TIME)
         hours, rem = divmod(duration, 3600)
         minutes, seconds = divmod(rem, 60)
         time_str = f"{hours} ساعة و {minutes} دقيقة" if hours else f"{minutes} دقيقة و {seconds} ثانية"
-        
         await event.respond(f"⚡ **أهلاً بعودتك يا جو!** تم إيقاف وضع السليب تلقائياً.\n⏳ كنت غائب لمدة: `{time_str}`")
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.سليب(?: (.*))?"))
@@ -267,11 +260,8 @@ async def set_afk(event):
     if not AFK_STATUS:
         AFK_STATUS = True
         AFK_TIME = time.time()
-        
-        # سحب السبب لو انكتب، لو منكتبش بياخد السبب الافتراضي
         reason = event.pattern_match.group(1)
         AFK_REASON = reason if reason else DEFAULT_REASON
-        
         await event.edit(f"💤 **تم تفعيل وضع السليب بنجاح.**\n📝 الرد الحالي: `{AFK_REASON}`")
 
 @client.on(events.NewMessage(incoming=True))
@@ -279,24 +269,14 @@ async def afk_responder(event):
     global AFK_STATUS, AFK_TIME, AFK_REASON
     if not AFK_STATUS:
         return
-
-    # حساب مدة الغياب الحالية
-    current_time = time.time()
-    duration = round(current_time - AFK_TIME)
+    duration = round(time.time() - AFK_TIME)
     hours, rem = divmod(duration, 3600)
     minutes, seconds = divmod(rem, 60)
     time_str = f"{hours} س و {minutes} د" if hours else f"{minutes} د و {seconds} ث"
-
-    # الرد هيكون السبب بتاعك بالظبط وتحته العداد
     full_reply = f"{AFK_REASON}\n\n⏳ غائب منذ: {time_str}"
-
-    # 1. الرد في الخاص
-    if event.is_private:
-        if not event.is_bot and not event.is_channel:
-            await event.reply(full_reply)
-
-    # 2. الرد في الجروبات لو حد عملك تاغ أو ريبلاي
+    
+    if event.is_private and not event.is_bot and not event.is_channel:
+        await event.reply(full_reply)
     elif event.is_group:
         if event.mentioned or (event.reply_to_msg_id and (await event.get_reply_to_msg()).sender_id == (await event.client.get_me()).id):
             await event.reply(full_reply)
-
