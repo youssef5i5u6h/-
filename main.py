@@ -124,7 +124,7 @@ async def disable_anti_ttl(event):
 async def core_storage_and_anti_destruct(event):
     global ARCHIVE_GROUP_ID, AFK_STATUS, AFK_TIME, AFK_REASON, ANTI_MUTILATE_ACTIVE
     
-    # 1. صائد الصور والفيديوهات ذاتية التدمير (يشتغل فقط لو ANTI_MUTILATE_ACTIVE تساوي True)
+    # 1. صائد الصور والفيديوهات ذاتية التدمير
     if ANTI_MUTILATE_ACTIVE and event.is_private and not event.out and event.media:
         is_ttl = hasattr(event.media, 'ttl_seconds') and event.media.ttl_seconds is not None
         if is_ttl:
