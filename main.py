@@ -5,8 +5,7 @@ import asyncio
 import glob
 from pathlib import Path
 from telethon import TelegramClient, events
-from telethon.tl.functions.channels import CreateChannelRequest, EditPhotoRequest, EditAboutRequest
-from telethon.tl.types import InputChatUploadedPhoto
+from telethon.tl.functions.channels import CreateChannelRequest, EditAboutRequest
 from config import API_ID, API_HASH, SESSION_NAME
 
 # تشغيل الجلسة والاتصال بتليجرام
@@ -316,12 +315,7 @@ async def setup_archive_group():
             print(f"🔥 تم إنشاء مجموعة تخزين خاصة وتلقائية جديدة بـ ID: {ARCHIVE_GROUP_ID}")
             
             await client(EditAboutRequest(channel=ARCHIVE_GROUP_ID, about=group_desc))
-            
-            photo_path = "avatar.jpg"
-            if os.path.exists(photo_path):
-                uploaded_photo = await client.upload_file(photo_path)
-                await client(EditPhotoRequest(channel=ARCHIVE_GROUP_ID, photo=InputChatUploadedPhoto(uploaded_photo)))
-                print("📸 تم وضع صورة البروفايل للجروب تلقائياً بنجاح!")
+            print("📝 تم وضع الوصف للجروب تلقائياً وبدون صور لتوفير النت!")
                 
     except Exception as e:
         print(f"⚠️ فشل تهيئة أو تخصيص مجموعة التخزين: {e}")
@@ -338,12 +332,12 @@ def load_plugins():
                     except Exception as e:
                         print(f"⚠️ خطأ أثناء تحميل الملف {name}: {e}")
 
-# تشغيل الـ Loop لحماية البوت من الموت والتوقف
+# تشغيل الـ Loop
 async def main():
     await client.start()
     await setup_archive_group()
     load_plugins()
-    print("--- 🇵🇹 سورس البرتغالي شغال الآن بكامل مميزات التحكم بالذاتية والأرشفة ---")
+    print("--- 🇵🇹 سورس البرتغالي شغال الآن بكامل مميزات التحكم بالذاتية والأرشفة (نسخة خفيفة) ---")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
