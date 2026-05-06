@@ -237,9 +237,6 @@ if __name__ == "__main__":
     print("="*50 + "\n")
     client.start()
     client.run_until_disconnected()
-    import time
-from telethon import events
-
 # متغيرات لحفظ حالة النوم والوقت والسبب
 AFK_STATUS = False
 AFK_TIME = None
@@ -248,7 +245,7 @@ AFK_REASON = ""
 # هنا تقدر تغير الكلمة الافتراضية اللي هترد بيها لو كتبت .سليب من غير ما تحدد سبب
 DEFAULT_REASON = "قافل حالياً، أول ما أفتح هرد عليك بالتفصيل."
 
-@bot.on(events.NewMessage(outgoing=True))
+@client.on(events.NewMessage(outgoing=True))
 async def afk_breaker(event):
     global AFK_STATUS, AFK_TIME, AFK_REASON
     # لو كتبت رسالة في أي شات.. يتعطل وضع النوم تلقائياً
@@ -264,7 +261,7 @@ async def afk_breaker(event):
         
         await event.respond(f"⚡ **أهلاً بعودتك يا جو!** تم إيقاف وضع السليب تلقائياً.\n⏳ كنت غائب لمدة: `{time_str}`")
 
-@bot.on(events.NewMessage(outgoing=True, pattern=r"^\.سليب(?: (.*))?"))
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.سليب(?: (.*))?"))
 async def set_afk(event):
     global AFK_STATUS, AFK_TIME, AFK_REASON
     if not AFK_STATUS:
@@ -277,7 +274,7 @@ async def set_afk(event):
         
         await event.edit(f"💤 **تم تفعيل وضع السليب بنجاح.**\n📝 الرد الحالي: `{AFK_REASON}`")
 
-@bot.on(events.NewMessage(incoming=True))
+@client.on(events.NewMessage(incoming=True))
 async def afk_responder(event):
     global AFK_STATUS, AFK_TIME, AFK_REASON
     if not AFK_STATUS:
@@ -298,7 +295,7 @@ async def afk_responder(event):
         if not event.is_bot and not event.is_channel:
             await event.reply(full_reply)
 
-    # 2. الرد في الجروبات لو حد عملك تاغ أو ريبلاي (إعادة توجيه ورد)
+    # 2. الرد في الجروبات لو حد عملك تاغ أو ريبلاي
     elif event.is_group:
         if event.mentioned or (event.reply_to_msg_id and (await event.get_reply_to_msg()).sender_id == (await event.client.get_me()).id):
             await event.reply(full_reply)
