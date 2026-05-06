@@ -1,0 +1,4 @@
+API_ID = 24576280
+API_HASH = '2d331fea63e2dfeb0d2c2cf71a9a0cc9'
+SESSION_NAME = "session2"
+
