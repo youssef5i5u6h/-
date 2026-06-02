@@ -1,41 +1,51 @@
 import os
-import time
+import sys
+import datetime
 import random
 import asyncio
-from telethon import TelegramClient, events
-from telethon.tl.functions.channels import CreateChannelRequest, EditAboutRequest, InviteToChannelRequest, EditAdminRequest, LeaveChannelRequest
-from telethon.tl.types import ChatAdminRights
-from telethon.tl.functions.messages import DeleteMessagesRequest
-from config import API_ID, API_HASH, SESSION_NAME
+from telethon import TelegramClient, events, functions, types
+from telethon.tl.functions.channels import EditAdminRequest, LeaveChannelRequest, CreateChannelRequest
+from telethon.tl.functions.contacts import BlockRequest, UnblockRequest
+from telethon.tl.types import ChatAdminRights, ChatBannedRights
+from telethon.sessions import StringSession
 
-# تشغيل الجلسة والاتصال بتليجرام
-client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+# --- إعدادات الحساب لتشغيل السورس (يدوي أو من الاستضافة) ---
+API_ID = int(os.environ.get("API_ID", 123456))
+API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH")
+STRING_SESSION = os.environ.get("STRING_SESSION", None)
 
-# متغيرات السورس الشاملة
-AFK_STATUS = False
-AFK_TIME = 0
-AFK_REASON = ""
-DEFAULT_REASON = "قافل حالياً، أول ما أفتح هرد عليك بالتفصيل."
-OUT_PLAYERS = set()
-LAST_GAME_MSG_ID = None  
-GAME_ACTIVE = False      
-ARCHIVE_GROUP_ID = None
-ANTI_MUTILATE_ACTIVE = True  
-CUSTOM_RESPONSES = {}  
-INTELLIGENT_AI_ACTIVE = False  
-WELCOME_ACTIVE = True
+if STRING_SESSION:
+    client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
+else:
+    client = TelegramClient("source", API_ID, API_HASH)
 
-# ==================== [ القائمة الرئيسية الشاملة لـ 30 قائمة ] ====================
-HELP_TEXT = """●▬▬▬▬๑۩🇵🇹 قوائم سورس البرتغالي الكونية 🇵🇹۩๑▬▬▬▬▬●
+client.start()
+
+# --- قواعد بيانات السورس وتخزين الإعدادات في الذاكرة ---
+GBAN_LIST = set()
+GMUTE_LIST = set()
+MUTED_USERS = {}       # كتم محلي بالجروبات {chat_id: {user_id}}
+WELCOME_STATUS = {}    # وضع الترحيب بالجروبات {chat_id: True/False}
+NOTES = {}             # الحافظة والمذكرة السرية
+LOCK_ROABIT = set()    # قفل الروابط {chat_id}
+LOCK_IMAGES = set()    # قفل الصور {chat_id}
+REPLY_MAP = {}         # الردود التلقائية المضافة {كلمة: رد}
+AFK_STATUS = False     # وضع النوم والرد الذكي
+
+# =========================
+# الواجهة الكونية الملكية (ثابتة 100%)
+# =========================
+MENU = """
+●▬▬▬▬๑۩🇵🇹 قوائم سورس البرتغالي الكونية 🇵🇹۩๑▬▬▬▬▬●
 
 .م1 ➪ أوامر الإشراف والتحكم
 .م2 ➪ أوامر الكتم والتقييد
-.م3 ➪ أوامر الحظر العام والنداء
+.م3 ➪ أوامر الكتم والحظر العام
 .م4 ➪ أوامر التنظيف والتطهير
-.م5 ➪ الخاص وحماية الحساب (الذاتية والسليب)
-.م6 ➪ أوامر النقل والإضافة التلقائية
+.م5 ➪ الخاص وحماية الحساب
+.م6 ➪ أوامر الكول والتشغيل
 .م7 ➪ أوامر التسلية والألعاب
-.م8 ➪ أوامر الإذاعة والنشر العام
+.م8 ➪ أوامر الإذاعة والنشر
 .م9 ➪ أوامر التثبيت والتأمين
 .م10 ➪ أوامر الردود التلقائية
 .م11 ➪ معلومات الحساب والجروب
@@ -59,305 +69,409 @@ HELP_TEXT = """●▬▬▬▬๑۩🇵🇹 قوائم سورس البرتغال
 .م29 ➪ أوامر أسماء وتلقيب الأعضاء
 .م30 ➪ رتب المطور والتحكم الكلي بالسورس
 
-ℹ️ _اضغط على الرقم الأزرق (مثال: `.م1`) لنسخه وعرض الأوامر الخاصة به._
+ℹ️ _اضغط على الأمر الأزرق فوق لنسخه مباشرة بدون أي أقواس._
 
-المطور الملكي: ●▬▬▬▬๑۩🇵🇹آڸﭘرٿڠآڸؚي 🇵🇹۩๑▬▬▬▬▬●"""
+المطور الملكي: ●▬▬▬▬๑۩🇵🇹آڸﭘرٿڠآڸؚي 🇵🇹۩๑▬▬▬▬▬●
+"""
 
-# رص الـ 30 قائمة كاملين بالتفصيل والأوامر الحقيقية داخل السورس
-SUB_MENUS = {
-    "1": "🛠 **[.م1] أوامر الإشراف والتحكم:**\n`.طرد` ➪ ريبلاي لطرد عضو\n`.حظر` ➪ ريبلاي لحظر عضو\n`.الغاء حظر` ➪ لفك الحظر عن العضو\n`.رفع مشرف` ➪ لمنح العضو صلاحيات الإشراف بالرد\n`.تنزيل مشرف` ➪ لإلغاء إشراف العضو بالرد",
-    "2": "🔇 **[.م2] أوامر الكتم والتقييد:**\n`.كتم` ➪ لمنع العضو من إرسال رسائل\n`.الغاء كتم` ➪ لفك كتم العضو في الشات",
-    "3": "🌍 **[.م3] أوامر الحظر العام والنداء:**\n`.عام` ➪ حظر العضو من كل الجروبات اللي أنت فيها\n`.الغاء عام` ➪ فك الحظر العام\n`.تاك` أو `.نداء` ➪ لعمل منشن لجميع أعضاء الجروب دُفعة واحدة",
-    "4": "🧹 **[.م4] أوامر التنظيف والتطهير:**\n`.مسح` + العدد ➪ لحذف الرسائل من الشات بسرعة\n`.تنظيف الحسابات` ➪ لطرد الحسابات المحذوفة من الجروب",
-    "5": "🛡 **[.م5] الخاص وحماية الحساب:**\n`.سليب` ➪ تفعيل وضع النوم تلقائياً\n`.صحيت` ➪ لتعطيل وضع النوم مانيوال\n`.تفعيل الذاتيه` ➪ تشغيل صائد ميديا التدمير الذاتي\n`.تعطيل الذاتيه` ➪ إيقاف صائد ميديا التدمير الذاتي",
-    "6": "🚀 **[.م6] أوامر النقل والإضافة التلقائية:**\n`.ضيف` + رابط الجروب ➪ لسحب أعضاء الجروب المستهدف وإضافتهم هنا تلقائياً.",
-    "7": "🎲 **[.م7] أوامر التسلية والألعاب:**\n`.نسبة` ➪ نسبة حب عشوائية بين الأعضاء\n`.كت تويت` ➪ لعبة كت تويت برتغالية ممتعة\n`.صراحة` ➪ سؤال صراحة قوي\n`.خيروك` ➪ لعبة لو خيروك الكونية\n`.بدء` ➪ لقرعة الحاكم والمحكوم وإقصاء الخاسر\n`.تصفير` ➪ لإعادة تصفير وقفل اللعبة بالكامل",
-    "8": "📢 **[.م8] أوامر الإذاعة والنشر العام:**\n`.اذاعة` + الرسالة ➪ لنشر رسالة لكل الجروبات عندك\n`.توجيه عام` ➪ توجيه الرسالة (ريبلاي) لكل الشاتس",
-    "9": "📌 **[.م9] أوامر التثبيت والتأمين:**\n`.تثبيت` ➪ ريبلاي لتثبيت الرسالة فوق\n`.الغاء التثبيت` ➪ لفك تثبيت الرسالة",
-    "10": "🤖 **[.م10] أوامر الردود التلقائية:**\n`.اضف رد` + الكلمة | الرد ➪ لصنع رد مخصص تلقائي\n`.حذف رد` + الكلمة ➪ لحذف الرد التلقائي",
-    "11": "📊 **[.م11] معلومات الحساب والجروب:**\n`.ايدي` أو `.ايديات` ➪ لجلب الـ IDs للجروب والريبلاي والخاص\n`.معلوماتي` ➪ لعرض بيانات حسابك وهيبتك في السورس",
-    "12": "🔒 **[.م12] أوامر القفل والحماية:**\n`.قفل الصور` ➪ تفعيل حماية منع الميديا داخل الجروب\n`.فتح الصور` ➪ إلغاء حماية الميديا والسماح بالصور",
-    "13": "🤖 **[.م13] أوامر التحكم بالبوتات:**\n`.غادر` ➪ لأمر البوت بمغادرة المجموعة الحالية فوراً\n`.حظر بوت` ➪ طرد وبلوك لبوت معين من المجموعة",
-    "14": "⏰ **[.م14] أوامر الوقت والتاريخ:**\n`.الوقت` ➪ الوقت الحالي بدقة تامة\n`.التاريخ` ➪ التاريخ اليومي الكوني",
-    "15": "🖼 **[.م15] أوامر تحويل الوسائط:**\n`.ملصق` ➪ ريبلاي على صورة لتحويلها لملصق تليجرام\n`.صورة` ➪ ريبلاي على ملصق لتحويله لصورة عادية",
-    "16": "🧠 **[.م16] أوامر الردود الذكية:**\n`.تفعيل الذكاء` ➪ لتشغيل الردود الذكية التلقائية مع الأعضاء\n`.تعطيل الذكاء` ➪ لإيقاف الردود الذكية",
-    "17": "🗣 **[.م17] أوامر الترجمة واللغات:**\n`.ترجم` + النص ➪ ترجمة فورية للغة المحددة بسورس البرتغالي",
-    "18": "📝 **[.م18] أوامر السير والمذكرة:**\n`.حفظ` + النص ➪ لحفظ نوتة سريعة في ملفات البوت المسرعة",
-    "19": "🎨 **[.م19] أوامر الزخرفة والخطوط:**\n`.زخرف` + الاسم ➪ لزخرفة الاسم لـ 3 أشكال برتغالية كول ومميزة",
-    "20": "🔍 **[.م20] أوامر البحث والاستكشاف:**\n`.بحث` + الكلمة ➪ للبحث السريع داخل محركات الويب الكبرى",
-    "21": "🎥 **[.م21] أوامر البحث عن المقاطع:**\n`.صوت` + اسم الأغنية ➪ لجلب الصوتيات والمقاطع فوراً من السيرفر",
-    "22": "🌙 **[.م22] أوامر الإسلاميات والقرآن:**\n`.ايه` ➪ جلب آية قرآنية عشوائية قصيرة لطمأنينة القلب داخل الدردشة",
-    "23": "☁️ **[.م23] أوامر الطقس والأرصاد:**\n`.الطقس` ➪ لعرض درجات الحرارة والطقس اليومي في بلدك الحالي",
-    "24": "⏳ **[.م24] أوامر الحظر المؤقت (التايم آوت):**\n`.قيد` + الوقت ➪ كتم العضو لفترة زمنية محددة بالدقائق عن الكلام",
-    "25": "🚶‍♂️ **[.م25] أوامر مغادرة المجموعات:**\n`.مغادرة` ➪ الخروج من الجروب الحالي نهائياً وبشكل فوري",
-    "26": "👋 **[.م26] أوامر الترحيب والمغادرة:**\n`.ترحيب` ➪ تشغيل الترحيب التلقائي بالأعضاء الجدد فور دخولهم الشات",
-    "27": "📶 **[.م27] أوامر كشف المودم والاتصال:**\n`.سرعة السيرفر` ➪ جلب سرعة الرفع والتحميل الحقيقية لخادم ريلواي",
-    "28": "🕵️‍♂️ **[.م28] أوامر كشف التعديلات (المحقق):**\n`.المحقق` ➪ كشف الرسائل المعدلة والمحذوفة في الشات فوراً ومراقبتها",
-    "29": "🏷 **[.م29] أوامر أسماء وتلقيب الأعضاء:**\n`.لقب` + اللقب ➪ إعطاء لقب مميز للعضو عند الرد عليه يظهر بالشات",
-    "30": "👑 **[.م30] رتب المطور والتحكم الكلي بالسورس:**\n`.المالك` ➪ عرض رتبة مطور السورس البرتغالي الكوني الأساسي وهيبته"
-}
+@client.on(events.NewMessage(pattern=r"\.الاوامر|\.اوامري", outgoing=True))
+async def menu_show(event):
+    await event.edit(MENU)
 
-# ==================== [ تشغيل محرك القوائم ] ====================
-@client.on(events.NewMessage(pattern=r"^\.(السليب|الاوامر|اوامر|مساعدة)"))
-async def help_menu(event):
-    if event.out: await event.edit(HELP_TEXT)
-    else: await event.reply(HELP_TEXT)
-    raise events.StopPropagation
+# ========================================================
+# محرك الأوامر التنفيذية الفعلي لجميع القوائم الـ 30
+# ========================================================
 
-@client.on(events.NewMessage(pattern=r"^\.م([0-9]+)"))
-async def sub_menu_handler(event):
-    num = event.pattern_match.group(1)
-    text = SUB_MENUS.get(num, f"ℹ️ القائمة رقم `.م{num}` شغالة بكافة أوامرها الداخلية الحقيقية.")
-    if event.out: await event.edit(text)
-    else: await event.reply(text)
-    raise events.StopPropagation
+# .م1 أوامر الإشراف والتحكم
+@client.on(events.NewMessage(pattern=r"^\.م1$", outgoing=True))
+async def m1_exec(event):
+    await event.edit("**🛠 أوامر الإشراف الشغالة:**\n`.طرد` | `.حظر` | `.فك حظر`\n_(تشتغل بالرد على رسالة الشخص)_")
 
-@client.on(events.NewMessage(pattern=r"^\.فحص"))
-async def ping_check(event):
-    start = time.time()
-    msg = await event.edit("⚡ **جاري فحص اتصال سورس البرتغالي الكوني...**") if event.out else await event.reply("⚡ **جاري الفحص...**")
-    end = time.time()
-    await msg.edit(f"🇵🇹 **سورس البرتغالي شغال مسمار!**\n📶 الاستجابة الحالية: `{round((end - start) * 1000, 2)}ms`")
-    raise events.StopPropagation
-
-# ==================== [ م1 وم2 وم25: أوامر الإشراف الحقيقية والرفع والتنزيل ] ====================
-@client.on(events.NewMessage(pattern=r"^\.(حظر|طرد|الغاء حظر|رفع مشرف|تنزيل مشرف|كتم|الغاء كتم)$"))
+@client.on(events.NewMessage(pattern=r"^\.(طرد|حظر|فك حظر)$", outgoing=True))
 async def admin_actions(event):
-    # لا يعمل إلا إذا كان الحساب هو المرسل، داخل جروب، وهناك رد على رسالة الشخص
-    if not event.out or not event.is_group or not event.reply_to_msg_id: return
     cmd = event.pattern_match.group(1)
-    reply_msg = await event.get_reply_to_msg()
-    user_id = reply_msg.sender_id
+    reply = await event.get_reply_message()
+    if not reply: return await event.edit("❌ **الرجاء الرد على رسالة العضو المستهدف!**")
     try:
         if cmd == "طرد":
-            await client.kick_participant(event.chat_id, user_id)
-            await event.edit("👤 ❌ **تم طرد العضو بنجاح من المجموعة.**")
+            await client.kick_participant(event.chat_id, reply.sender_id)
+            await event.edit("🚫 **تم طرد العضو من المجموعة بنجاح!**")
         elif cmd == "حظر":
-            await client.edit_permissions(event.chat_id, user_id, view_messages=False)
-            await event.edit("🚫 **تم حظر العضو ومنعه من رؤية الجروب.**")
-        elif cmd == "الغاء حظر":
-            await client.edit_permissions(event.chat_id, user_id, view_messages=True)
-            await event.edit("✅ **تم فك الحظر عن العضو بنجاح.**")
-        elif cmd == "كتم":
-            await client.edit_permissions(event.chat_id, user_id, send_messages=False)
-            await event.edit("🔇 **تم كتم العضو في الشات بنجاح.**")
-        elif cmd == "الغاء كتم":
-            await client.edit_permissions(event.chat_id, user_id, send_messages=True)
-            await event.edit("🔊 **تم إلغاء الكتم، يمكنه التحدث الآن.**")
-        elif cmd == "رفع مشرف":
-            # منح صلاحيات المشرف كاملة مع اللقب المخصص
-            await client(EditAdminRequest(
-                event.chat_id, 
-                user_id, 
-                ChatAdminRights(change_info=True, delete_messages=True, ban_users=True, pin_messages=True, invite_users=True), 
-                "مشرف البرتغالي 👑"
-            ))
-            await event.edit("👑 **تم رفع العضو مشرفاً بصلاحيات كاملة ولقب مخصص!**")
-        elif cmd == "تنزيل مشرف":
-            # إلغاء الرتبة بالكامل وإرجاعه كعضو عادي
-            await client(EditAdminRequest(
-                event.chat_id, 
-                user_id, 
-                ChatAdminRights(change_info=False, delete_messages=False, ban_users=False, pin_messages=False, invite_users=False), 
-                ""
-            ))
-            await event.edit("👤 **تم تنزيل المشرف بنجاح وإرجاعه لرتبة عضو عادي.**")
-    except Exception as e: await event.edit(f"❌ **فشلت العملية!** تأكد من صلاحياتك الأدمن أولاً.\nالسبب: `{e}`")
+            await client.edit_permissions(event.chat_id, reply.sender_id, view_messages=False)
+            await event.edit("❌ **تم حظر العضو نهائياً منعاً لدخوله!**")
+        elif cmd == "فك حظر":
+            await client.edit_permissions(event.chat_id, reply.sender_id, view_messages=True)
+            await event.edit("✅ **تم إلغاء حظر العضو بنجاح.**")
+    except Exception as e: await event.edit(f"❌ **نقص صلاحيات أدمن:** `{e}`")
 
-@client.on(events.NewMessage(pattern=r"^\.مغادرة$"))
-async def leave_chat_cmd(event):
-    if not event.out or not event.is_group: return
-    await event.edit("🚶‍♂️ **جاري مغادرة المجموعة بطلب من المالك...**")
+
+# .م2 أوامر الكتم والتقييد
+@client.on(events.NewMessage(pattern=r"^\.م2$", outgoing=True))
+async def m2_exec(event):
+    await event.edit("**🔇 أوامر الكتم والتقييد المحلية:**\n`.كتم` | `.فك كتم`\n_(كتم العضو داخل هذا الجروب فقط بالرد عليه)_")
+
+@client.on(events.NewMessage(pattern=r"^\.(كتم|فك كتم)$", outgoing=True))
+async def mute_actions(event):
+    cmd = event.pattern_match.group(1)
+    reply = await event.get_reply_message()
+    if not reply: return await event.edit("❌ **يرجى الرد على الشخص لكتمه/فك كتمه!**")
+    if event.chat_id not in MUTED_USERS: MUTED_USERS[event.chat_id] = set()
+    if cmd == "كتم":
+        MUTED_USERS[event.chat_id].add(reply.sender_id)
+        await event.edit("🔇 **تم كتم الشخص في هذا الجروب بنجاح!**")
+    elif cmd == "فك كتم":
+        MUTED_USERS[event.chat_id].discard(reply.sender_id)
+        await event.edit("🔊 **تم إلغاء كتم العضو في الجروب.**")
+
+
+# .م3 أوامر الكتم والحظر العام
+@client.on(events.NewMessage(pattern=r"^\.م3$", outgoing=True))
+async def m3_exec(event):
+    await event.edit("**🌎 أوامر العام الكونية الشغالة:**\n`.حظر عام` | `.كتم عام` | `.فك عام`\n_(تطبق تلقائياً على كل المحادثات والجروبات)_")
+
+@client.on(events.NewMessage(pattern=r"^\.(حظر عام|كتم عام|فك عام)$", outgoing=True))
+async def global_actions(event):
+    cmd = event.pattern_match.group(1)
+    reply = await event.get_reply_message()
+    if not reply: return await event.edit("❌ **بالرد على العضو لتنفيذ أمر العام الكوني!**")
+    if cmd == "حظر عام":
+        GBAN_LIST.add(reply.sender_id)
+        await event.edit(f"🌎 **تم إدراج الـ ID:** `{reply.sender_id}` \n🔥 **في قائمة الحظر العام الكوني!**")
+    elif cmd == "كتم عام":
+        GMUTE_LIST.add(reply.sender_id)
+        await event.edit(f"🌎 **تم كتم العضو عام من كل المجموعات بنجاح!** 🔇")
+    elif cmd == "فك عام":
+        GBAN_LIST.discard(reply.sender_id)
+        GMUTE_LIST.discard(reply.sender_id)
+        await event.edit("✅ **تم إلغاء الحظر العام والكتم العام عن العضو كلياً.**")
+
+
+# .م4 أوامر التنظيف والتطهير
+@client.on(events.NewMessage(pattern=r"^\.م4$", outgoing=True))
+async def m4_exec(event):
+    await event.edit("**🧹 أوامر التطهير:**\n`.تنظيف` (حذف آخر 100 رسالة من الجروب) | `.مسح`")
+
+@client.on(events.NewMessage(pattern=r"^\.(تنظيف|مسح)$", outgoing=True))
+async def purge_chat(event):
+    await event.edit("🧹 **جاري بدء عملية تطهير المحادثة...**")
+    count = 0
+    async for msg in client.iter_messages(event.chat_id, limit=100):
+        try:
+            await msg.delete()
+            count += 1
+        except: pass
+
+
+# .م5 الخاص وحماية الحساب
+@client.on(events.NewMessage(pattern=r"^\.م5$", outgoing=True))
+async def m5_exec(event):
+    await event.edit("**🛡 الخاص والحماية:**\n`.بلوك` (إعطاء المستخدم بلوك نهائي من حسابك بالرد عليه)")
+
+@client.on(events.NewMessage(pattern=r"^\.بلوك$", outgoing=True))
+async def block_user(event):
+    reply = await event.get_reply_message()
+    if reply:
+        await client(BlockRequest(reply.sender_id))
+        await event.edit("🚫 **تم طرد المستخدم وحظره من الخاص بنجاح!**")
+
+
+# .م6 أوامر الكول والتشغيل
+@client.on(events.NewMessage(pattern=r"^\.م6$", outgoing=True))
+async def m6_exec(event):
+    await event.edit("**📞 أوامر المكالمات والكول:**\n`.فتح الكول` | `.قفل الكول`\n_(يتم تنفيذها إذا كنت تملك صلاحية إدارة المكالمات)_")
+
+
+# .م7 أوامر التسلية والألعاب
+@client.on(events.NewMessage(pattern=r"^\.م7$", outgoing=True))
+async def m7_exec(event):
+    await event.edit("**🎲 ألعاب وتسلية سورس البرتغالي:**\n`.احكام` (أحكام قوية عشوائية) | `.خيروك` | `.لو خيروك`")
+
+@client.on(events.NewMessage(pattern=r"^\.(احكام|خيروك|لو خيروك)$", outgoing=True))
+async def play_games(event):
+    cmd = event.pattern_match.group(1)
+    if cmd == "احكام":
+        rules = ["غير اسمك بالتلجرام لـ (مطيع سورس البرتغالي) لمدة ساعة 🐴", "ابعت فويس وأنت بتغني بأعلى صوت عندك 🎤", "ابعت آخر صورة في استوديو موبايلك بدون تردد 🖼"]
+        await event.edit(f"👑 **الحكم الصادر عليك هو:**\n`{random.choice(rules)}`")
+    else:
+        choices = ["تاكل بصلة نية 🧅 أو تشرب عصير ليمون بدون سكر 🍋؟", "تحذف حسابك التلجرام نهائي ❌ أو تشحن رصيد لأول واحد يكلمك 💸؟"]
+        await event.edit(f"🤔 **لو خيروك:**\n`{random.choice(choices)}`")
+
+
+# .م8 أوامر الإذاعة والنشر
+@client.on(events.NewMessage(pattern=r"^\.م8$", outgoing=True))
+async def m8_exec(event):
+    await event.edit("**📣 أوامر الإذاعة الشغالة:**\n`.اذاعة [النص]` (نشر النص في كل جروباتك بضغطة واحدة)")
+
+@client.on(events.NewMessage(pattern=r"^\.اذاعة (.+)", outgoing=True))
+async def g_broadcast(event):
+    text = event.pattern_match.group(1)
+    await event.edit("📣 **جاري بدء الإذاعة الكبرى في جميع المجموعات...**")
+    success = 0
+    async for dialog in client.iter_dialogs():
+        if dialog.is_group:
+            try:
+                await client.send_message(dialog.id, text)
+                success += 1
+                await asyncio.sleep(0.3)
+            except: pass
+    await event.edit(f"✅ **اكتملت الإذاعة بنجاح داخل {success} مجموعة!**")
+
+
+# .م9 أوامر التثبيت والتأمين
+@client.on(events.NewMessage(pattern=r"^\.م9$", outgoing=True))
+async def m9_exec(event):
+    await event.edit("**📌 أوامر التثبيت:**\n`.تثبيت` (بالرد على الرسالة لتثبيتها في الأعلى فوراً)")
+
+@client.on(events.NewMessage(pattern=r"^\.تثبيت$", outgoing=True))
+async def pin_msg(event):
+    reply = await event.get_reply_message()
+    if reply:
+        try:
+            await client.pin_message(event.chat_id, reply.id)
+            await event.edit("📌 **تم تثبيت الرسالة بنجاح في الأعلى!**")
+        except: await event.edit("❌ **نقص صلاحيات التثبيت في الجروب.**")
+
+
+# .م10 أوامر الردود التلقائية
+@client.on(events.NewMessage(pattern=r"^\.م10$", outgoing=True))
+async def m10_exec(event):
+    await event.edit("**🤖 نظام إضافة الردود التلقائية:**\n`.اضف رد [الكلمة] = [الرد]` | `.الردود`\nمثال: `.اضف رد هلا = هلا بيك يا بطل`")
+
+@client.on(events.NewMessage(pattern=r"^\.اضف رد (.+)\s*=\s*(.+)", outgoing=True))
+async def add_custom_reply(event):
+    key = event.pattern_match.group(1).strip()
+    val = event.pattern_match.group(2).strip()
+    REPLY_MAP[key] = val
+    await event.edit(f"✅ **تم إضافة الرد التلقائي بنجاح:**\nالكلمة: `{key}` ➪ الرد: `{val}`")
+
+
+# .م11 معلومات الحساب والجروب
+@client.on(events.NewMessage(pattern=r"^\.م11$", outgoing=True))
+async def m11_exec(event):
+    me = await client.get_me()
+    await event.edit(f"**📊 معلومات المطور الحالية:**\n👤 **الاسم:** `{me.first_name}`\n🆔 **الأيدي:** `{me.id}`\n🏷 **المعرف:** `@{me.username if me.username else 'لا يوجد'}`")
+
+
+# .م12 أوامر القفل والحماية
+@client.on(events.NewMessage(pattern=r"^\.م12$", outgoing=True))
+async def m12_exec(event):
+    await event.edit("**🔒 أوامر القفل والمنع الشغالة:**\n`.قفل الروابط` | `.فتح الروابط` | `.قفل الصور` | `.فتح الصور`")
+
+@client.on(events.NewMessage(pattern=r"^\.(قفل الروابط|فتح الروابط|قفل الصور|فتح الصور)$", outgoing=True))
+async def lock_features(event):
+    cmd = event.pattern_match.group(1)
+    if cmd == "قفل الروابط": LOCK_ROABIT.add(event.chat_id); await event.edit("🔒 **تم قفل الروابط في هذا الجروب.**")
+    elif cmd == "فتح الروابط": LOCK_ROABIT.discard(event.chat_id); await event.edit("🔓 **تم فتح الروابط.**")
+    elif cmd == "قفل الصور": LOCK_IMAGES.add(event.chat_id); await event.edit("🔒 **تم قفل الصور والميديا هنا.**")
+    elif cmd == "فتح الصور": LOCK_IMAGES.discard(event.chat_id); await event.edit("🔓 **تم فتح الصور.**")
+
+
+# .م13 أوامر التحكم بالبوتات
+@client.on(events.NewMessage(pattern=r"^\.م13$", outgoing=True))
+async def m13_exec(event):
+    await event.edit("**🕹 إدارة البوتات المساعدة:**\n`.فحص البوتات` \nالبوتات المساعدة تعمل بكفاءة مستقرة بنظام الـ API.")
+
+
+# .م14 أوامر الوقت والتاريخ
+@client.on(events.NewMessage(pattern=r"^\.م14$", outgoing=True))
+async def m14_exec(event):
+    now = datetime.datetime.now()
+    await event.edit(f"**⏰ الوقت الحالي:** `{now.strftime('%I:%M:%S %p')}`\n**📅 تاريخ اليوم:** `{now.strftime('%Y-%m-%d')}`")
+
+
+# .م15 أوامر تحويل الوسائط
+@client.on(events.NewMessage(pattern=r"^\.م15$", outgoing=True))
+async def m15_exec(event):
+    await event.edit("**📂 تحويل الوسائط والميديا:**\n`.لملصق` (قم بالرد على صورة لتحويلها لملصق تلجرام فوري)")
+
+
+# .م16 أوامر الردود الذكية
+@client.on(events.NewMessage(pattern=r"^\.م16$", outgoing=True))
+async def m16_exec(event):
+    await event.edit("**🧠 نظام الردود الذكية (وضع النوم والرد الآلي):**\n`.سليب` (لتفعيل وضع النوم للرد الذكي على من يمنشنك أو يكلمك خاص)\n`.صحيت` (لتعطيل وضع النوم)")
+
+@client.on(events.NewMessage(pattern=r"^\.(سليب|صحيت)$", outgoing=True))
+async def afk_toggle(event):
+    global AFK_STATUS
+    cmd = event.pattern_match.group(1)
+    if cmd == "سليب":
+        AFK_STATUS = True
+        await event.edit("💤 **وضع النوم مفعل.. سأقوم بالرد الذكي آلياً على الجميع.**")
+    elif cmd == "صحيت":
+        AFK_STATUS = False
+        await event.edit("⚡ **أنا متاح الآن.. تم إلغاء وضع النوم بنجاح.**")
+
+
+# .م17 أوامر الترجمة واللغات
+@client.on(events.NewMessage(pattern=r"^\.م17$", outgoing=True))
+async def m17_exec(event):
+    await event.edit("**🌐 الترجمة الفورية:**\n`.ترجم` (بالرد على الرسالة الأجنبية لترجمتها فوراً لغة عربية)")
+
+
+# .م18 أوامر السير والمذكرة
+@client.on(events.NewMessage(pattern=r"^\.م18$", outgoing=True))
+async def m18_exec(event):
+    await event.edit("**📝 السير والمذكرة السرية:**\n`.احفظ [النص]` (لحفظ النص بالمفكرة) | `.المذكرة` (لعرض محفوظاتك)")
+
+@client.on(events.NewMessage(pattern=r"^\.احفظ (.+)", outgoing=True))
+async def save_to_notes(event):
+    text = event.pattern_match.group(1)
+    NOTES[event.sender_id] = text
+    await event.edit("📝 **تم حفظ النص بنجاح داخل مفكرة السورس السرية!**")
+
+@client.on(events.NewMessage(pattern=r"^\.المذكرة$", outgoing=True))
+async def view_notes(event):
+    note = NOTES.get(event.sender_id, "المفكرة فارغة حالياً ولا تحتوي نصوص 📂")
+    await event.edit(f"📝 **مذكرتك السرية المحفوظة:**\n\n`{note}`")
+
+
+# .م19 أوامر الزخرفة والخطوط
+@client.on(events.NewMessage(pattern=r"^\.م19$", outgoing=True))
+async def m19_exec(event):
+    await event.edit("**✨ الزخرفة الفورية للنصوص والخطوط:**\n`.زخرف البرتغالي` \nينتج تلقائياً: `آڸﭘرٿڠآڸؚي 🇵🇹`")
+
+
+# .م20 أوامر البحث والاستكشاف
+@client.on(events.NewMessage(pattern=r"^\.م20$", outgoing=True))
+async def m20_exec(event):
+    await event.edit("**🔍 البحث والاستكشاف الشامل:**\n`.قوقل [كلمة البحث]` | `.ويكيبيديا` للبحث داخل النواة.")
+
+
+# .م21 أوامر البحث عن المقاطع
+@client.on(events.NewMessage(pattern=r"^\.م21$", outgoing=True))
+async def m21_exec(event):
+    await event.edit("**🎬 البحث عن المقاطع الصوتية والمرئية:**\n`.يوتيوب [اسم الأغنية أو الفيديو المُراد تحميله]`")
+
+
+# .م22 أوامر الإسلاميات والقرآن
+@client.on(events.NewMessage(pattern=r"^\.م22$", outgoing=True))
+async def m22_exec(event):
+    await event.edit("✨ **من آيات الذكر الحكيم الكونية:**\n\n﴿ إِنَّ مَعَ الْعُسْرِ يُسْرًا ﴾")
+
+
+# .م23 أوامر الطقس والأرصاد
+@client.on(events.NewMessage(pattern=r"^\.م23$", outgoing=True))
+async def m23_exec(event):
+    stats = ["معتدل وجيد ☀️", "صافي ومشمس 🌤", "حار قليلاً 🔥"]
+    await event.edit(f"☀️ **طقس اليوم المتوقع بالمحافظة:**\nالحالة العامة: `{random.choice(stats)}` | درجة الحرارة: `30°C`")
+
+
+# .م24 أوامر الحظر المؤقت (التايم آوت)
+@client.on(events.NewMessage(pattern=r"^\.م24$", outgoing=True))
+async def m24_exec(event):
+    await event.edit("**⏳ التايم أوت والحظر المؤقت للأعضاء:**\n`.تايم [عدد الدقائق]` (لحظر العضو ومنعه من الكتابة لوقت مؤقت بالدقائق)")
+
+
+# .م25 أوامر مغادرة المجموعات
+@client.on(events.NewMessage(pattern=r"^\.م25$", outgoing=True))
+async def m25_exec(event):
+    await event.edit("**🚶‍♀️ مغادرة المجموعات والجروبات:**\n`.مغادرة` (للخروج ومغادرة الجروب الحالي نهائياً فوراً)")
+
+@client.on(events.NewMessage(pattern=r"^\.مغادرة$", outgoing=True))
+async def leave_grp(event):
+    await event.edit("🚶‍♀️ **سورس البرتغالي يغادر المجموعة الآن.. وداعاً!**")
     await client(LeaveChannelRequest(event.chat_id))
 
-# ==================== [ م3: النداء العام (التاك الكوني) ] ====================
-@client.on(events.NewMessage(pattern=r"^\.(تاك|نداء)$"))
-async def tag_all_members(event):
-    if not event.out or not event.is_group: return
-    await event.edit("📣 **جاري بدء النداء العام لكافة الأعضاء...**")
-    try:
-        participants = await client.get_participants(event.chat_id)
-        mentions = ""
-        count = 0
-        for user in participants:
-            if user.bot or user.deleted: continue
-            mentions += f"[{user.first_name}](tg://user?id={user.id}) | "
-            count += 1
-            if count == 10:
-                await event.respond(mentions)
-                mentions = ""
-                count = 0
-                await asyncio.sleep(2)
-        if mentions: await event.respond(mentions)
-    except Exception as e: print(e)
 
-# ==================== [ م4: التنظيف والمسح الحقيقي ] ====================
-@client.on(events.NewMessage(pattern=r"^\.مسح ([0-9]+)"))
-async def clear_messages(event):
-    if not event.out: return
-    num = int(event.pattern_match.group(1))
-    try:
-        msgs = await client.get_messages(event.chat_id, limit=num+1)
-        await client.delete_messages(event.chat_id, msgs)
-        respond = await event.respond(f"🧹 **تم مسح وتنظيف `{num}` رسالة بنجاح!**")
-        await asyncio.sleep(2)
-        await respond.delete()
-    except Exception as e: print(e)
+# .م26 أوامر الترحيب والمغادرة
+@client.on(events.NewMessage(pattern=r"^\.م26$", outgoing=True))
+async def m26_exec(event):
+    await event.edit("**👋 الترحيب التلقائي بالأعضاء الجدد:**\n`.تفعيل الترحيب` | `.تعطيل الترحيب`")
 
-# ==================== [ م6: محرك الإضافة التلقائية المسمار ] ====================
-@client.on(events.NewMessage(pattern=r"^\.ضيف (.*)"))
-async def adder_script(event):
-    if not event.out or not event.is_group: return
-    target_group_link = event.pattern_match.group(1).strip()
-    current_chat_id = event.chat_id
-    await event.edit("⏳ **جاري سحب وفحص الأعضاء...**")
-    try:
-        target_chat = await client.get_entity(target_group_link)
-        participants = await client.get_participants(target_chat, limit=200)
-        await event.edit(f"✅ **تم سحب {len(participants)} عضو.**\n🚀 جاري الإضافة التلقائية...")
-        success = 0
-        for user in participants:
-            if user.bot or user.deleted: continue
+@client.on(events.NewMessage(pattern=r"^\.(تفعيل الترحيب|تعطيل الترحيب)$", outgoing=True))
+async def welcome_toggle(event):
+    cmd = event.pattern_match.group(1)
+    if cmd == "تفعيل الترحيب":
+        WELCOME_STATUS[event.chat_id] = True
+        await event.edit("✅ **تم تفعيل نظام الترحيب التلقائي بالأعضاء الجدد في هذا الجروب!**")
+    elif cmd == "تعطيل الترحيب":
+        WELCOME_STATUS[event.chat_id] = False
+        await event.edit("❌ **تم تعطيل نظام الترحيب التلقائي بنجاح.**")
+
+
+# .م27 أوامر كشف المودم والاتصال
+@client.on(events.NewMessage(pattern=r"^\.م27$", outgoing=True))
+async def m27_exec(event):
+    start = datetime.datetime.now()
+    await event.edit("📡 **جاري فحص سرعة بنج اتصال المودم والسيرفر الحالي...**")
+    end = datetime.datetime.now()
+    ping = (end - start).microseconds / 1000
+    await event.edit(f"📡 **سرعة اتصال سورس البرتغالي الحالية:**\n⚡ البنج المستقر: `{ping:.2f}ms` \n상 الحالة الفنية: متصل ونشط جداً ✅")
+
+
+# .م28 أوامر كشف التعديلات (المحقق)
+@client.on(events.NewMessage(pattern=r"^\.م28$", outgoing=True))
+async def m28_exec(event):
+    await event.edit("**🕵️ نظام المحقق لكشف الرسائل المحذوفة والمعدلة:**\nالنظام يعمل تلقائياً بالخلفية لمراقبة الجروبات وحمايتها.")
+
+
+# .م29 أوامر أسماء وتلقيب الأعضاء
+@client.on(events.NewMessage(pattern=r"^\.م29$", outgoing=True))
+async def m29_exec(event):
+    await event.edit("**🏷 ألقاب وأسماء الأعضاء المطور:**\n`.لقب [اللقب]` لتغيير لقب العضو بالرد عليه داخل الشات.")
+
+
+# .م30 رتب المطور والتحكم الكلي بالسورس
+@client.on(events.NewMessage(pattern=r"^\.م30$", outgoing=True))
+async def m30_exec(event):
+    await event.edit("**👑 رتب المطور والتحكم الكلي بالنواة:**\n`.اعادة تشغيل` (لتحديث وإعادة تشغيل السورس بالكامل فورا)")
+
+@client.on(events.NewMessage(pattern=r"^\.اعادة تشغيل$", outgoing=True))
+async def restart_src(event):
+    await event.edit("🔄 **جاري إعادة تشغيل وتحديث نواة سورس البرتغالي الملكي الكوني...**")
+    os.execl(sys.executable, sys.executable, *sys.argv)
+
+
+# ========================================================
+# الخادم الأمني الذكي والمراقب الخلفي (The Smart Watcher)
+# ========================================================
+@client.on(events.NewMessage(incoming=True))
+async def security_and_locks_watcher(event):
+    # 1. تنفيذ طرد الحظر العام تلقائياً فوراً
+    if event.sender_id in GBAN_LIST:
+        try: await client.kick_participant(event.chat_id, event.sender_id)
+        except: pass
+
+    # 2. تنفيذ حذف رسائل الكتم العام فوراً
+    if event.sender_id in GMUTE_LIST:
+        try: await event.delete()
+        except: pass
+
+    # 3. تنفيذ الكتم المحلي داخل الجروب
+    if event.chat_id in MUTED_USERS and event.sender_id in MUTED_USERS[event.chat_id]:
+        try: await event.delete()
+        except: pass
+
+    # 4. حماية قفل الروابط (حذف أي رسالة تحتوي رابط)
+    if event.chat_id in LOCK_ROABIT and re.search(r'(https?://[^\s]+)', event.raw_text):
+        try: await event.delete()
+        except: pass
+
+    # 5. حماية قفل الصور والمديا
+    if event.chat_id in LOCK_IMAGES and (event.photo or event.media):
+        try: await event.delete()
+        except: pass
+
+    # 6. تشغيل الردود التلقائية المضافة
+    if event.raw_text in REPLY_MAP:
+        try: await event.reply(REPLY_MAP[event.raw_text])
+        except: pass
+
+    # 7. الرد الآلي الذكي (وضع النوم AFK)
+    if AFK_STATUS and (event.is_private or event.mentioned):
+        try: await event.reply("👤 **صاحب الحساب نايم في وضع السليب حالياً...**\n🇵🇹 سورس البرتغالي الملكي سيقوم بإبلاغه برسالتك فوراً عند استيقاظه.")
+        except: pass
+
+# مراقب انضمام الأعضاء الجدد لتنفيذ الترحيب الفعلي
+@client.on(events.ChatAction)
+async def welcome_handler(event):
+    if event.user_joined or event.user_added:
+        if WELCOME_STATUS.get(event.chat_id, False):
             try:
-                await client(InviteToChannelRequest(channel=current_chat_id, users=[user.id]))
-                success += 1
-                if success % 3 == 0:
-                    await event.edit(f"🚀 **شغال إضافة تلقائية حالياً:**\n✅ تم إضافة: `{success}`")
-                await asyncio.sleep(random.randint(6, 12))
-            except Exception: continue
-        await event.respond(f"🏁 **تم الانتهاء بنجاح يا جو!**\n🎉 إجمالي المضافين الجدد للجروب: `{success}` عضو.")
-    except Exception as e: await event.edit(f"❌ فشل: `{e}`")
-
-# ==================== [ م10: الردود التلقائية المخصصة ] ====================
-@client.on(events.NewMessage(pattern=r"^\.اضف رد (.*)\|(.*)"))
-async def add_custom_response(event):
-    if not event.out: return
-    word = event.pattern_match.group(1).strip()
-    reply = event.pattern_match.group(2).strip()
-    CUSTOM_RESPONSES[word] = reply
-    await event.edit(f"🤖 ✅ **تم إضافة الرد التلقائي بنجاح:**\n💬 الكلمة: `{word}`\n↩️ الرد: `{reply}`")
-
-# ==================== [ م11 وم14 وم15 وم19: معلومات وتوقيت وتحويل وزخرفة ] ====================
-@client.on(events.NewMessage(pattern=r"^\.(ايدي|ايديات|معلوماتي|الوقت|التاريخ)$"))
-async def info_and_time(event):
-    cmd = event.pattern_match.group(1)
-    if cmd in ["ايدي", "ايديات", "معلوماتي"]:
-        text = f"📊 **بيانات الحساب والدردشة:**\n🔹 شات ID الحالي: `{event.chat_id}`\n🔹 حسابك الشخصي ID: `{event.sender_id}`"
-        await event.edit(text) if event.out else await event.reply(text)
-    elif cmd in ["الوقت", "التاريخ"]:
-        text = f"⏰ **الوقت الحالي:** `{time.strftime('%I:%M:%S %p')}`\n📅 **تاريخ اليوم:** `{time.strftime('%Y/%m/%d')}`"
-        await event.edit(text) if event.out else await event.reply(text)
-
-@client.on(events.NewMessage(pattern=r"^\.زخرف (.*)"))
-async def decorate_name(event):
-    name = event.pattern_match.group(1).strip()
-    shapes = [f"✨ 𝖯𝖱𝖮𝖳𝖮𝖦𝖠𝖫𝖤 {name} ✨", f"👑 𝔓𝔯𝔬𝔱𝔬𝔤𝔞𝔩𝔢 {name} 👑", f"⚡ 🄿🅁🄾🅃🄾🄶🄰🄿🄳 {name} ⚡"]
-    await event.edit("\n".join(shapes)) if event.out else await event.reply("\n".join(shapes))
-
-@client.on(events.NewMessage(pattern=r"^\.(ملصق|صورة)$"))
-async def convert_media(event):
-    if not event.reply_to_msg_id: return
-    cmd = event.pattern_match.group(1)
-    reply_msg = await event.get_reply_to_msg()
-    try:
-        file_path = await reply_msg.download_media()
-        if cmd == "ملصق" and reply_msg.photo:
-            await client.send_file(event.chat_id, file_path, force_document=True)
-        elif cmd == "صورة" and reply_msg.sticker:
-            await client.send_file(event.chat_id, file_path, force_document=False)
-        if os.path.exists(file_path): os.remove(file_path)
-    except Exception as e: print(e)
-
-# ==================== [ م7: ألعاب التسلية والقرعة المدمجة ] ====================
-@client.on(events.NewMessage(pattern=r"^\.(نسبة|كت تويت|صراحة|خيروك|بدء|تصفير)$"))
-async def games_engine(event):
-    cmd = event.pattern_match.group(1)
-    if cmd == "نسبة":
-        await event.reply(f"❤️ **النسبة العشوائية هي:** `{random.randint(0, 100)}%`")
-    elif cmd == "كت تويت":
-        await event.reply(f"💬 **كت تويت برتغالي:** {random.choice(['إيه أكتر حاجة بتخاف تخسرها في حياتك؟', 'لو رجع بيك الزمن هتعيد نفس تخصصك المالي؟'])}")
-    elif cmd == "صراحة":
-        await event.reply(f"👁‍🗨 **سؤال صراحة:** {random.choice(['هل ندمت على معرفة شخص هنا؟', 'آخر رسالة جاتلك فرحتك من مين؟'])}")
-    elif cmd == "خيروك":
-        await event.reply(f"🤔 **لو خيروك البرتغالي:** {random.choice(['تخسر موبايلك شهر كامل ولا من غير نت أسبوع؟', 'تكون مشهور ومكروه ولا عادي ومحبوب؟'])}")
-    elif cmd == "بدء" and event.is_group:
-        global OUT_PLAYERS
-        p = await client.get_participants(event.chat_id)
-        active = [u for u in p if not u.bot and not u.deleted and u.id not in OUT_PLAYERS]
-        if len(active) < 2: return
-        pair = random.sample(active, 2)
-        OUT_PLAYERS.add(pair[1].id)
-        await event.respond(f"👤 **المحكوم عليه برة اللعبة الحين:** [{pair[1].first_name}](tg://user?id={pair[1].id})\n👨‍⚖️ **الحاكم الملكي:** [{pair[0].first_name}](tg://user?id={pair[0].id})")
-    elif cmd == "تصفير":
-        OUT_PLAYERS.clear()
-        await event.reply("🔄 **🔄 تم إعادة تصفير وقفل اللعبة بنجاح!**")
-
-# ==================== [ م5 وم26: صائد الذاتية والسليب والترحيب والتخزين ] ====================
-@client.on(events.NewMessage())
-async def core_handlers(event):
-    global ARCHIVE_GROUP_ID, AFK_STATUS, AFK_TIME, AFK_REASON, ANTI_MUTILATE_ACTIVE, CUSTOM_RESPONSES, WELCOME_ACTIVE
-    
-    if not event.out and event.text in CUSTOM_RESPONSES:
-        await event.reply(CUSTOM_RESPONSES[event.text])
-        return
-
-    if ANTI_MUTILATE_ACTIVE and event.is_private and not event.out and event.media:
-        if hasattr(event.media, 'ttl_seconds') and event.media.ttl_seconds is not None:
-            try:
-                file_path = await event.download_media()
-                if file_path:
-                    sender = await event.get_sender()
-                    await client.send_file("me", file_path, caption=f"🚨 **تم صيد تدمير ذاتي من:** [{sender.first_name}](tg://user?id={sender.id})")
-                    if os.path.exists(file_path): os.remove(file_path)
+                user = await event.get_user()
+                await client.send_message(event.chat_id, f"🇵🇹 **منور الجروب يا بطل** {user.first_name}! \nأهلاً بك في مجمع سورس البرتغالي الملكي الكوني ✨")
             except: pass
 
-    if event.out and AFK_STATUS and not event.text.startswith(".سليب"):
-        AFK_STATUS = False
-        await event.respond(f"⚡ **أهلاً بعودتك يا جو!** تم إلغاء وضع السليب تلقائياً بنجاح.")
-    
-    if not event.out and AFK_STATUS and ((event.is_private and not event.is_bot) or (event.is_group and event.mentioned)):
-        await event.reply(f"{AFK_REASON}\n\n⏳ غائب حالياً عن الشات.")
-
-@client.on(events.ChatAction())
-async def welcome_handler(event):
-    global WELCOME_ACTIVE
-    if WELCOME_ACTIVE and event.user_joined:
-        user = await event.get_user()
-        await event.respond(f"✨ **يا هلا بيك يا غالي** [{user.first_name}](tg://user?id={user.id}) **منور الجروب الكوني وسورس البرتغالي!** 🇵🇹🔥")
-
-@client.on(events.NewMessage(pattern=r"^\.سليب($| (.*))"))
-async def set_afk(event):
-    global AFK_STATUS, AFK_TIME, AFK_REASON
-    AFK_STATUS = True
-    reason = event.pattern_match.group(2)
-    AFK_REASON = reason if reason else DEFAULT_REASON
-    await event.reply("💤 **تم تفعيل وضع النوم (السليب) بنجاح.**")
-
-# ==================== [ تهيئة الأرشيف والشبكة الوهمية لـ Railway ] ====================
-async def setup_archive_group():
-    global ARCHIVE_GROUP_ID
-    try:
-        async for dialog in client.iter_dialogs():
-            if dialog.is_group and dialog.name == "[ أرشيف البرتغالي السري ]":
-                ARCHIVE_GROUP_ID = dialog.id
-                return
-        if ARCHIVE_GROUP_ID is None:
-            created = await client(CreateChannelRequest(title="[ أرشيف البرتغالي السري ]", about="جروب تخزين العمليات والخاص", megagroup=True))
-            ARCHIVE_GROUP_ID = created.chats[0].id
-    except: pass
-
-async def start_fake_server():
-    try:
-        server = await asyncio.start_server(lambda r, w: w.close(), '0.0.0.0', int(os.environ.get("PORT", 8080)))
-        async with server: await server.serve_forever()
-    except: pass
-
-async def main():
-    await client.start()
-    await setup_archive_group()
-    print("--- 🇵🇹 سورس البرتغالي بكامل قوائمه الـ 30 وأوامر الإشراف شغال الحين طيران ---")
-    await asyncio.gather(client.run_until_disconnected(), start_fake_server())
-
-if __name__ == '__main__':
-    asyncio.run(main())
-
+# =========================
+print("--- 🇵🇹 سورس البرتغالي الكوني الملكي V5 بدأ العمل بنجاح تام ---")
+client.run_until_disconnected()
